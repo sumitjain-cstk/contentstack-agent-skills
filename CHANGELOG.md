@@ -16,6 +16,10 @@ All notable changes to the Contentstack agent skills bundle. Versions match the 
   - `register-component` gives every registration a `layerIcon`, so parts don't all show Studio's default glyph in the Layers tree. `register-component-pitfalls` covers `icon` used instead, and bare names or source paths.
   - An expired or copied preview link no longer answers 500: `configure-csr-vs-ssr` retries once without the preview parameters when the preview host turns the code down (`UPSTREAM_ERROR` with a 4xx), and decides the 404 from the query actually fetched. `troubleshoot` and `troubleshoot-composition-resolution` route the symptom there.
   - `install-studio` drops `exclude: ["outsideLivePreviewPortal"]` from `editButton`, so the Live Preview pane shows the Edit button that leads to Visual Editor.
+  - Next.js App Router renders in a Server Component when the installed studio-react has the `client-registration` entry. `install-studio` checks for it with `require.resolve`, and every App Router step branches on the result.
+    - With the entry, the registration file (`studio/register-components.ts`, no `"use client"`) imports `lib/contentstack.ts` first. `setClientRegistration` loads it in the browser only on the pages Studio opens, so visitors download no Studio SDK. Live Preview starts from its own `app/live-preview.tsx`.
+    - The catch-all page renders `<StudioComponent />` itself, with no `"use client"` wrapper and no `getSSRStyles` (`configure-csr-vs-ssr` step 3a). The canvas page drops `"use client"`, because the client build's `StudioCanvas` doesn't wait for the registrations and fails with `INIT_NOT_COMPLETE`.
+    - On studio-react 2.0.x, the `StudioInit` boundary and the client wrapper stay as before. Updated: `install-studio`, `register-component`, `register-component-pitfalls`, `understand-installation`, `setup-section-preview`, `configure-csr-vs-ssr`, `setup-template-preview-routes`.
 
 ## 0.4.1
 

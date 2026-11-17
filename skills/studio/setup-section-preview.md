@@ -87,7 +87,10 @@ Only once 1 to 3 hold, continue.
      // app/layout.tsx — Server Component; stays the one root layout
      import "./globals.css";                       // CSS and fonts: kept on the canvas
      import { SiteChrome } from "./site-chrome";
-     import { StudioInit } from "./studio-init";   // from install-studio step 8
+     // From install-studio step 8. With the client-registration entry:
+     import StudioClientRegistration from "@/studio/client-registration";
+     import { LivePreview } from "./live-preview";
+     // On studio-react 2.0.x instead: import { StudioInit } from "./studio-init";
      // Providers, Header, Footer: the app's own, imported as they are today
 
      export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -95,7 +98,8 @@ Only once 1 to 3 hold, continue.
          <html lang="en">
            <body>
              <Providers>                            {/* kept on the canvas */}
-               <StudioInit />
+               <StudioClientRegistration />         {/* 2.0.x: <StudioInit /> */}
+               <LivePreview />                      {/* 2.0.x: none, lib/contentstack starts it */}
                <SiteChrome header={<Header />} footer={<Footer />}>{children}</SiteChrome>
              </Providers>
            </body>
@@ -111,7 +115,20 @@ Only once 1 to 3 hold, continue.
 
    **Verify isolation before proceeding.** Open `http://localhost:<port><canvasPath>` in a browser, open DevTools, then the Network tab. You should see **only** the framework's assets + `@contentstack/*`, NO calls to `kit.fontawesome.com`, `c.lytics.io`, GA, chat providers, commerce embeds. If you see any of those, follow the isolation pattern above and re-verify. Skipping this step is fine short-term but every wrong-network-request shows up as a scary overlay to whoever opens Studio next.
 
-   **Next.js App Router** (`app/<canvasPath>/page.tsx`):
+   **Next.js App Router** (`app/<canvasPath>/page.tsx`). Run the [`install-studio`](install-studio.md) step 8 check first.
+
+   With the `client-registration` entry, the page is a Server Component, with **no `"use client"`**:
+   ```tsx
+   // app/canvas/page.tsx — NO "use client"
+   import { StudioCanvas } from "@contentstack/studio-react";
+
+   export default function CanvasRoute() {
+     return <StudioCanvas />;
+   }
+   ```
+   Without the directive, `@contentstack/studio-react` resolves to its server build, whose `StudioCanvas` waits for the registrations `setClientRegistration` loads, and for the init they import, before it renders. With `"use client"`, the page gets the client build's `StudioCanvas`, which doesn't wait, and the section fails with `INIT_NOT_COMPLETE`.
+
+   On studio-react 2.0.x, mark it `"use client"`:
    ```tsx
    // app/canvas/page.tsx
    "use client";

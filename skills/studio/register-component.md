@@ -45,7 +45,7 @@ The registration is a `registerComponent` call that names the component, gives i
 
 ## Task
 
-1. **Locate the registration entry point.** Look for `src/register-components.tsx`, `src/register-studio.ts`, or `src/lib/contentstack.ts` (whichever file imports `registerComponent` or `registerLazyComponent` from `@contentstack/studio-react`). If none exists, create `src/register-components.tsx` and ensure it's imported once at app startup (before any `<StudioCanvas />` or `<StudioComponent />` mounts).
+1. **Locate the registration entry point.** Look for `studio/register-components.ts` (Next.js App Router, step 5b), `src/register-components.tsx`, `src/register-studio.ts`, or `src/lib/contentstack.ts` (whichever file imports `registerComponent` or `registerLazyComponent` from `@contentstack/studio-react`). If none exists, create `src/register-components.tsx` and ensure it's imported once at app startup (before any `<StudioCanvas />` or `<StudioComponent />` mounts).
 
 2. **Read the component at `componentPath`.** Extract the prop names and types. Source of truth ranked by reliability:
    - Explicit TypeScript interface (`interface HeroProps { … }`), most reliable
@@ -141,7 +141,15 @@ The registration is a `registerComponent` call that names the component, gives i
 
    **Retrofitting an existing registration file?** Every registration without `thumbnailUrl` is a blank tile today. Sweep them all: `grep -cE "register(Lazy)?Component\(" <file>` vs `grep -c "thumbnailUrl" <file>`. The counts must match.
 
-5b. **Next.js App Router: registration must run in the CLIENT realm.** A registered component that is (or renders) a `"use client"` component cannot be registered from a Server Component module graph. On the server the SDK sees a client reference, and Next throws at render time ("Attempted to call the default export of \<module\> from the server but it's on the client") or the palette silently comes up empty because the registry that got populated was the server-side one.
+5b. **Next.js App Router: where the registration file runs.** It depends on the [`install-studio`](install-studio.md) step 8 check for the `client-registration` entry.
+
+   **The entry exists: one file serves both renderers.** The registrations live in `studio/register-components.ts`, which `install-studio` creates with **no `"use client"`** and `import "@/lib/contentstack";` as its first line. The catch-all page imports it on the server, where `@contentstack/studio-react` resolves to its server build, so the calls fill the server render's registry. `setClientRegistration` loads the same file in the browser for Studio's client renderer. Append registrations to that file, and keep these rules:
+
+   - **A registered component that calls a hook or handles events needs `"use client"` at the top of its own file.** That covers React's hooks (`useState`, `useEffect`) and Studio's (`useStudioState`, `useStudioRichText`). Without it, Next.js reports an error for React's hooks, and Studio's hooks throw `… is a client hook`. The component still renders on the server for the first response, like any client component on a Server Component page.
+   - **Register design tokens in the same file,** so the server render and the canvas use the same tokens.
+   - **Never put `"use client"` on the registration file,** and never import it from `app/layout.tsx` or a client component every page renders. The first hides the registrations from the server render. The second sends the SDK and Studio's renderer to every visitor.
+
+   **The entry doesn't exist (studio-react 2.0.x): registration must run in the CLIENT realm.** A registered component that is (or renders) a `"use client"` component cannot be registered from a Server Component module graph. On the server the SDK sees a client reference, and Next throws at render time ("Attempted to call the default export of \<module\> from the server but it's on the client") or the palette silently comes up empty because the registry that got populated was the server-side one.
 
    The rule: **`registerComponents()` runs from the same client boundary that runs `studioSdk.init`.** `install-studio` already creates one for init (`app/studio-init.tsx`, `"use client"`, side-effect import of `@/lib/contentstack`). Put the registration import there too, so both land in the client bundle in the right order:
 
@@ -153,7 +161,7 @@ The registration is a `registerComponent` call that names the component, gives i
    export function StudioInit() { return null; }
    ```
 
-   Do **not** import the registration module from `app/layout.tsx`, a `page.tsx` Server Component, or any non-`"use client"` module. Pages Router / Vite / Remix don't have this split. A module-scope import in `_app.tsx` or `main.tsx` is fine. Related: [`install-studio`](install-studio.md) § App Router init boundary, and [`troubleshoot-ssr-rendering`](troubleshoot-ssr-rendering.md) for the registry-singleton symptoms.
+   On 2.0.x, do **not** import the registration module from `app/layout.tsx`, a `page.tsx` Server Component, or any non-`"use client"` module. Pages Router / Vite / Remix don't have this split. A module-scope import in `_app.tsx` or `main.tsx` is fine. Related: [`install-studio`](install-studio.md) § App Router init boundary, and [`troubleshoot-ssr-rendering`](troubleshoot-ssr-rendering.md) for the registry-singleton symptoms.
 
 6. **Write the registration: prefer LAZY by default.** Append (or update) the registration file. The recommended shape is **lazy**: the component is downloaded only when it first renders, keeping the initial bundle small and code-splitting each registration automatically. `registerLazyComponent` wraps the loader with `React.lazy` + `Suspense` for you.
 

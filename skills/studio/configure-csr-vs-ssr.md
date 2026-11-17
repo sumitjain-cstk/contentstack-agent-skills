@@ -19,8 +19,9 @@ The SDK ships two App Router paths (client-component SSR via the main entry, and
 Pick your recipe from the framework recipes chapter and copy it verbatim:
 
 - **Next.js Pages Router**, **Remix / React Router 7**, **Astro**, **Gatsby**: adapted recipes.
+- **Next.js App Router: Server Component render**: the default when `@contentstack/studio-react/client-registration` resolves ([`install-studio`](install-studio.md) step 8). The page renders the root `<StudioComponent />` itself, and visitors' pages don't download the SDK. Step 3a.
 - **Next.js App Router: RSC entry**: CI-tested on Next 14 + Next 16. Smallest possible client bundle.
-- **Next.js App Router: client-component SSR**: main-entry path, simplest wiring, full SEO.
+- **Next.js App Router: client-component SSR**: main-entry path on studio-react 2.0.x, simplest wiring, full SEO. Step 3b.
 
 Same contract everywhere: `fetchCompositionData`, `<StudioComponent />` (`<StudioServerComponent />` on the RSC entry), then the server styles (`getSSRStyles` in React, `getSSRStyleTags` outside React, or `<StudioServerStyles />` on the RSC entry), plus `getCompositionMetadata` for SEO. Sections below cover the render-strategy decision itself. The mechanics live in the recipes above.
 
@@ -44,9 +45,9 @@ const specOptions = await sdk.fetchCompositionData({ url, searchQuery }, { local
 
 ## The render-pipeline rule (read this first)
 
-What determines **true SSR** (the composition DOM in the server HTML) is whether `<StudioComponent>` renders through a **`renderToString` pipeline** (Pages Router / Vite custom server / Remix) or, on App Router, through a **`"use client"` wrapper**, which Next also renders to HTML on the server. The RSC entry (`@contentstack/studio-react/rsc`) is the other App Router path: its `<StudioServerComponent />` renders in a Server Component. `@contentstack/studio-react` ships no `"use client"` directive and its renderer calls hooks, so a Server Component cannot render it directly. The data-fetch function (`fetchCompositionData` vs `useCompositionData`) is orthogonal and does **not** by itself produce SSR.
+What determines **true SSR** (the composition DOM in the server HTML) is whether `<StudioComponent>` renders through a **`renderToString` pipeline** (Pages Router / Vite custom server / Remix) or, on App Router, through a **`"use client"` wrapper**, which Next also renders to HTML on the server. The RSC entry (`@contentstack/studio-react/rsc`) is the other App Router path: its `<StudioServerComponent />` renders in a Server Component. On studio-react 2.0.x, `@contentstack/studio-react` ships no `"use client"` directive and its renderer calls hooks, so a Server Component cannot render it directly. Releases with the `client-registration` entry add a third App Router path: under Next's `react-server` condition the package root resolves to a server build, whose `<StudioComponent />` renders straight from a Server Component (step 3a). In Studio's editor it hands the composition to the client renderer, which loads the registrations `setClientRegistration` points at. The data-fetch function (`fetchCompositionData` vs `useCompositionData`) is orthogonal and does **not** by itself produce SSR.
 
-**Net:** every mainstream host, including Next App Router (main entry and RSC entry), Pages Router, Remix, Astro, Gatsby, and plain Node, renders the composition into the server HTML via the SDK's contract. See [`install-studio`](install-studio.md) for the per-host wiring. The main entry's `<StudioComponent />` can't render straight from a Server Component (its renderer calls hooks): put it behind a `"use client"` wrapper, or render `<StudioServerComponent />` from `@contentstack/studio-react/rsc`.
+**Net:** every mainstream host, including Next App Router (main entry and RSC entry), Pages Router, Remix, Astro, Gatsby, and plain Node, renders the composition into the server HTML via the SDK's contract. See [`install-studio`](install-studio.md) for the per-host wiring. With the `client-registration` entry, render `<StudioComponent />` from the Server Component (step 3a). On 2.0.x, the main entry's `<StudioComponent />` can't render straight from a Server Component (its renderer calls hooks): put it behind a `"use client"` wrapper (step 3b), or render `<StudioServerComponent />` from `@contentstack/studio-react/rsc`.
 
 ## Decision table
 
@@ -54,7 +55,8 @@ What determines **true SSR** (the composition DOM in the server HTML) is whether
 | --- | --- | --- |
 | Vite / React SPA, no SEO | **CSR**: `useCompositionData` | No (client only) |
 | **Next.js Pages Router** | **SSR**: `sdk.fetchCompositionData` and `getSSRStyles` inside `getServerSideProps` | **Yes**: `renderToString` |
-| **Next.js App Router (main entry)** | `sdk.fetchCompositionData` and `getSSRStyles` in a Server Component, then a client wrapper renders `<StudioComponent />` | **Yes**: Next server-renders the client component's initial output |
+| **Next.js App Router (Server Component, `client-registration` entry)** | `sdk.fetchCompositionData` in a Server Component, which renders `<StudioComponent />` itself. It adds the template's styles, so no `getSSRStyles` | **Yes**: visitors' pages load no Studio SDK. The client renderer loads only in Studio's editor and for a component that isn't registered for the server render |
+| **Next.js App Router (main entry, 2.0.x)** | `sdk.fetchCompositionData` and `getSSRStyles` in a Server Component, then a client wrapper renders `<StudioComponent />` | **Yes**: Next server-renders the client component's initial output |
 | **Next.js App Router (RSC entry)** | `sdk.fetchCompositionData` in a Server Component, then `<StudioServerStyles />` plus `<StudioServerComponent />` from `@contentstack/studio-react/rsc` | **Yes**: ~142B client bundle for structural content. Custom components register as client islands automatically |
 | Vite custom-server SSR | `renderToString` + `hydrateRoot` + `sdk.fetchCompositionData` | **Yes** |
 | Remix | `sdk.fetchCompositionData` inside the `loader` | **Yes**: `renderToString` |
@@ -231,7 +233,71 @@ Preview and editor requests must never be served from a cache: they carry `hash`
 
    **Live Preview wiring is separate.** If this route needs to reflect author edits in real time, add the `onEntryChange` bridge from `install-live-preview` (step 7). CSR pages call the hook's `refetchData` inside the loop-safe callback — it re-fetches just the bound data, which is all a live edit changes.
 
-3. **App Router: SSR through a client wrapper.** A Server Component fetches and computes the styles, a `"use client"` wrapper renders, and Next puts that output in the initial HTML (verified with `curl` in the App Router recipe). Initialize the sdk in a server-only module (no `"use client"`). Register components in a `"use client"` module the wrapper imports. Rendering `<StudioComponent />` directly in a Server Component fails with a Next.js client-component error: the renderer calls hooks.
+3. **App Router.** Run the [`install-studio`](install-studio.md) step 8 check (`node -p "require.resolve('@contentstack/studio-react/client-registration')"`). It prints a path: step 3a. It throws `ERR_PACKAGE_PATH_NOT_EXPORTED` (studio-react 2.0.x): step 3b.
+
+   **3a. Render in the Server Component (`client-registration` entry).** The page fetches and renders `<StudioComponent />` itself. With no `"use client"` in the file, `@contentstack/studio-react` resolves to its server build, and the component draws the template on the server and adds its styles. In Studio's editor it hands the composition to the client renderer, which `setClientRegistration` loads in the browser with your registrations. Visitors' pages download no Studio SDK. Needs the four files from `install-studio` step 8.
+   ```tsx
+   // app/[[...slug]]/page.tsx — NO "use client"
+   import { cache } from "react";
+   import { notFound } from "next/navigation";
+   import { StudioComponent, isCompositionNotFound, type StudioComponentSpecOptions } from "@contentstack/studio-react";
+   import { sdk, stack } from "@/lib/contentstack";
+   import "@/studio/register-components"; // fills the server render's registry
+
+   type Props = {
+     params: Promise<{ slug?: string[] }>;
+     searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+   };
+
+   // One fetch per request, shared by the page and generateMetadata.
+   const getComposition = cache((url: string, searchQuery: string) => {
+     stack.livePreviewQuery({ live_preview: "" }); // shared stack: drop the last request's preview hash
+     return sdk.fetchCompositionData({ url, searchQuery }, { locale: "en-us" });
+   });
+
+   async function toQuery({ params, searchParams }: Props) {
+     const { slug = [] } = await params;   // a Promise on Next 15+
+     const url = "/" + slug.join("/");
+     const query = new URLSearchParams();
+     for (const [key, value] of Object.entries(await searchParams)) {
+       for (const item of Array.isArray(value) ? value : [value ?? ""]) query.append(key, item); // keep repeated params
+     }
+     return { url, searchQuery: query.toString() };
+   }
+
+   export default async function Page(props: Props) {
+     const { url, searchQuery } = await toQuery(props);
+     let specOptions: StudioComponentSpecOptions;
+     try {
+       specOptions = await getComposition(url, searchQuery);
+     } catch (err) {
+       if (!isCompositionNotFound(err)) throw err; // a real failure stays a 500
+       notFound(); // in catch, never in try: it works by throwing
+     }
+     return <StudioComponent specOptions={specOptions} />; // no getSSRStyles: it adds the styles
+   }
+
+   export async function generateMetadata(props: Props) {
+     const { url, searchQuery } = await toQuery(props);
+     // Metadata must never throw: the page itself sends the 404 or the 500.
+     try {
+       const { seo } = await getComposition(url, searchQuery);
+       return seo
+         ? { title: seo.pageTitle, description: seo.pageDescription,
+             openGraph: { images: seo.openGraphImage ? [seo.openGraphImage] : [] } }
+         : {};
+     } catch {
+       return {};
+     }
+   }
+   ```
+   - **The init module is `lib/contentstack.ts`, not a server-only module.** The registration file imports it in the browser too, so `studioSdk.init` reaches Studio's canvas.
+   - **Delete `app/page.tsx`** if the app has one (`create-next-app` adds it). The optional catch-all serves `/` too, and Next.js won't build with both: `You cannot define a route with the same specificity as a optional catch-all route`.
+   - **Editor exemption:** a wildcard catch-all still needs it. Use `setup-template-preview-routes` step 5a (iii) as written, rendering `<StudioComponent specOptions={editorDraft(url, query)} />` where it renders `<StudioRender … />`. The draft's `mode: "edit"` sends it to the client renderer.
+   - **Canvas route:** a Server Component too, with no `"use client"` ([`setup-section-preview`](setup-section-preview.md) step 2).
+   - **Live Preview:** `app/live-preview.tsx` from `install-studio` step 8 starts it. Mount the `LivePreviewBridge` from `install-live-preview` (step 7) for real-time updates, exactly as in 3b.
+
+   **3b. SSR through a client wrapper (studio-react 2.0.x).** A Server Component fetches and computes the styles, a `"use client"` wrapper renders, and Next puts that output in the initial HTML (verified with `curl` in the App Router recipe). Initialize the sdk in a server-only module (no `"use client"`). Register components in a `"use client"` module the wrapper imports. Rendering `<StudioComponent />` directly in a Server Component fails with a Next.js client-component error: the renderer calls hooks.
    ```tsx
    // app/[[...slug]]/page.tsx — NO "use client"
    import { cache } from "react";
@@ -299,7 +365,7 @@ Preview and editor requests must never be served from a cache: they carry `hash`
    ```
 
    **Live Preview wiring is separate.** If this route needs real-time author updates, mount the `LivePreviewBridge` from `install-live-preview` (step 7) once in the app shell (e.g. in `app/layout.tsx` inside a client boundary). App Router routes call `router.refresh()` in the loop-safe callback. Do NOT put `[router]` in the effect deps. It produces an infinite refetch loop.
-   Canvas route stays client-only:
+   Canvas route stays client-only on 2.0.x:
    ```tsx
    // app/studio-canvas/page.tsx
    "use client";
@@ -415,7 +481,7 @@ Succeeds only when ALL of the following are true:
 - [ ] Server-side paths forward `searchQuery` from the incoming request to `fetchCompositionData`
 - [ ] **Every `fetchCompositionData` call is in a `try` / `catch`** that sends the 404 only when `isCompositionNotFound(err)` and **rethrows everything else**. No bare `await sdk.fetchCompositionData(...)` on a route, no blanket `catch { notFound() }`, and no 404 decided from the returned object
 - [ ] **Verified with a real miss:** request a URL with no composition (e.g. `/no-such-page`) and a valid-prefix-but-bad-slug URL under a connected template (e.g. `/blog/zzz-not-an-entry`). **Both return 404, not 500.** The second one is the `content_type_url_pattern` case and fails at a different stage. Testing only the first proves nothing about it
-- [ ] On App Router, the main entry's `<StudioComponent />` is rendered inside a `"use client"` boundary (the RSC entry's `<StudioServerComponent />` renders in a Server Component instead)
+- [ ] On App Router with the `client-registration` entry, `page.tsx` has no `"use client"`, renders `<StudioComponent />` itself and imports `@/studio/register-components`; the layout renders `<StudioClientRegistration />`. On 2.0.x, the main entry's `<StudioComponent />` is rendered inside a `"use client"` boundary (the RSC entry's `<StudioServerComponent />` renders in a Server Component instead)
 - [ ] If Live Preview is in scope for this route, the `LivePreviewBridge` from `install-live-preview` (step 7) is mounted in the app shell. Not needed for pure public SSR routes without Live Preview.
 - [ ] No `useCompositionData` call exists on a route that already fetched server-side (no double-fetch)
 - [ ] App Router routes export `generateMetadata` populated from `specOptions.seo`
@@ -446,6 +512,8 @@ If acceptance fails, report exactly which step broke and stop.
 | Testing 404 handling only with a totally unmatched URL | Passes, while every bad slug under a `content_type_url_pattern` template still 500s if you hand-rolled a list of names. That path matches the pattern and fails later, at entry lookup, with a different code | Test both shapes. Use the predicate rather than a list, and both are covered |
 | **Server-rendered route paints unstyled, then snaps into place on hydration** | Design-panel styles are generated at render time, not in your stylesheet. Markup alone carries none of them | Emit `getSSRStyles(specOptions.spec)` with the markup. See § Studio-authored styles on a server-rendered route |
 | `getSSRStyles` in the App Router `"use client"` wrapper | Hydration mismatch on the `<style>` | Call it in the Server Component `page.tsx` |
+| A `"use client"` wrapper or `getSSRStyles` kept after moving to the `client-registration` entry | The page still ships the client renderer to every visitor, or writes the template's styles twice | Step 3a: render `<StudioComponent />` from `page.tsx` and drop both |
+| `"use client"` on the canvas page with the `client-registration` entry | The section never loads on the canvas: `INIT_NOT_COMPLETE`. The client build's `StudioCanvas` doesn't wait for the registrations and init that `setClientRegistration` loads | Remove the directive. See `setup-section-preview` step 2 |
 | Pages Router reads `context.req.url` | 404 on client-side navigation: `req.url` is `/_next/data/<build>/....json` | Use `context.resolvedUrl` |
 | Pages Router returns raw `specOptions` | `next dev`: "Error serializing ... `undefined` cannot be serialized as JSON" | Return `JSON.parse(JSON.stringify(specOptions))` |
 | **Every bound image 400s through `next/image`** (`"hostname … is not configured under images"`) | Assets come from a Contentstack CDN host the optimizer doesn't trust by default. Nothing in the composition is wrong | Add the asset hosts to `images.remotePatterns` in `next.config.mjs`: `images.contentstack.io` plus your region's `*-images.contentstack.com`. Region-dependent, so read the URL the binding actually returned rather than guessing |
