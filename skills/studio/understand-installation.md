@@ -38,8 +38,10 @@ Two mounts in the default setup. The install does not add per-template routes.
 After `install-studio` completes:
 
 1. **Three SDK packages** in `package.json`.
-2. **`src/lib/contentstack.ts`** (or framework equivalent): the single bootstrap module. Exports `stack`, `sdk`, optionally `ContentstackLivePreview`. This is where `studioSdk.init({ stackSdk, contentTypeUid })` happens.
-3. **A side-effect import** at the app shell so the bootstrap runs once. Next App Router needs a `"use client" StudioInit` boundary. Vite / Pages Router / Remix import directly.
+2. **`src/lib/contentstack.ts`** (or framework equivalent): the single bootstrap module. Exports `stack`, `sdk`, optionally `ContentstackLivePreview`. This is where `studioSdk.init({ stackSdk, contentTypeUid })` happens. On Next App Router with the `client-registration` entry, Live Preview starts from `app/live-preview.tsx` instead.
+3. **A side-effect import** so the bootstrap runs once, in the browser. Vite / Pages Router / Remix import it directly in the app entry. Next App Router branches on whether `@contentstack/studio-react/client-registration` resolves (`install-studio` step 8):
+   - **It resolves:** `studio/register-components.ts` imports the bootstrap first, and `setClientRegistration` loads that file in the browser only on the pages Studio opens. Visitors' pages don't download the SDK.
+   - **It doesn't (studio-react 2.0.x):** a `"use client" StudioInit` boundary rendered from `app/layout.tsx`.
 4. **`.env.local`** with the five credentials.
 
 The two route mounts are SEPARATE skills: `setup-section-preview` adds the canvas route. `setup-template-preview-routes` adds the visitor route (catch-all by default). `install-studio` deliberately stops before them so each route is an explicit decision.

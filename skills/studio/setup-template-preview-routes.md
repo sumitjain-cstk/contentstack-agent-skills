@@ -142,6 +142,8 @@ Fix, in order: (1) a route in the app matches the template's URL, (2) that route
 
    **Next.js App Router variant (SSR (recommended for SEO sites)**) fetch in a Server Component, branch in a `"use client"` wrapper. The CSR `useCompositionData` snippet further below is for **SPAs without SEO needs only**. App Router apps that care about SEO must use this server-side path.
 
+   **First run the [`install-studio`](install-studio.md) step 8 check for the `client-registration` entry.** When it prints a path, drop `StudioRender`: `page.tsx` renders `<StudioComponent />` from `@contentstack/studio-react` itself and imports `@/studio/register-components`. The full file is [`configure-csr-vs-ssr`](configure-csr-vs-ssr.md) step 3a. In every App Router snippet in this skill, `<StudioRender specOptions={…} />` then becomes `<StudioComponent specOptions={…} />`, and the editor branch's `editorDraft` works unchanged. The wrapper snippets below are the studio-react 2.0.x form.
+
    ```tsx
    // app/[[...slug]]/page.tsx — Server Component
    import { sdk } from "@/lib/contentstack";

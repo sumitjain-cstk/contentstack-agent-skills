@@ -378,6 +378,8 @@ curl -s "https://<studio-api-host>/v1/projects" \
    export { studioSdk };
    ```
 
+   **Next.js App Router with the `client-registration` entry** (the check in step 8 prints a path): leave the `if (previewToken && typeof window !== "undefined") { … }` Live Preview block out of this file. Step 8 moves it to `app/live-preview.tsx`, because this file then loads in the browser only on the pages Studio opens, and Live Preview opens the site's ordinary pages.
+
    **Vite variant** (emit this exact file body when `vite` is in `package.json` dependencies / devDependencies):
    ```ts
    import Contentstack from "@contentstack/delivery-sdk";
@@ -493,7 +495,81 @@ curl -s "https://<studio-api-host>/v1/projects" \
    - After writing env files, log its presence once via `console.log(Boolean(import.meta.env.<PREFIX>_CONTENTSTACK_PREVIEW_TOKEN))` (never the token itself) to confirm it resolved, then remove the log before claiming setup succeeded.
 
 8. **Wire the import** at the app shell so init runs once. The right file depends on framework:
-   - **Next.js App Router**: **DO NOT import `@/lib/contentstack` directly in `app/layout.tsx`.** `layout.tsx` is a Server Component. A side-effect import there runs `studioSdk.init` / `ContentstackLivePreview.init` on the server, where the canvas iframe never sees them. Studio loads with no SDK in the client realm and `<StudioCanvas />` errors. Instead, create a tiny client boundary:
+   - **Next.js App Router**: **DO NOT import `@/lib/contentstack` directly in `app/layout.tsx`.** `layout.tsx` is a Server Component. A side-effect import there runs `studioSdk.init` / `ContentstackLivePreview.init` on the server, where the canvas iframe never sees them. Studio loads with no SDK in the client realm and `<StudioCanvas />` errors.
+
+     First check whether the installed SDK has the `client-registration` entry. Every App Router step in the Studio skills branches on this check:
+
+     ```bash
+     node -p "require.resolve('@contentstack/studio-react/client-registration')"
+     ```
+
+     It prints a path on the studio-react releases that render `<StudioComponent />` in a Server Component, and throws `ERR_PACKAGE_PATH_NOT_EXPORTED` on 2.0.x.
+
+     **It prints a path: start the init from the registration file.** The browser then runs `studioSdk.init` only on the pages that need Studio's client renderer (the canvas, the section preview route, a template with a component that isn't registered for the server render), and visitors' pages don't download the SDK. Emit four files:
+
+     ```ts
+     // studio/register-components.ts — NO "use client"
+     import "@/lib/contentstack";   // FIRST: runs studioSdk.init wherever this file loads
+     import { registerComponents } from "@contentstack/studio-react";
+
+     registerComponents([]);        // filled in by register-component
+     ```
+     ```tsx
+     // studio/client-registration.tsx
+     "use client";
+     import { setClientRegistration } from "@contentstack/studio-react/client-registration";
+
+     export default setClientRegistration(() => import("./register-components"));
+     ```
+     ```tsx
+     // app/live-preview.tsx — the Live Preview block left out of lib/contentstack.ts in step 6
+     "use client";
+
+     const previewToken = process.env.NEXT_PUBLIC_CONTENTSTACK_PREVIEW_TOKEN;
+
+     if (previewToken && typeof window !== "undefined") {
+       import("@contentstack/live-preview-utils")
+         .then(({ default: ContentstackLivePreview }) =>
+           ContentstackLivePreview.init({
+             enable: true,
+             mode: "builder",
+             ssr: true,       // the server fetch reads the preview hash, so no stackSdk here
+             stackDetails: {
+               apiKey: process.env.NEXT_PUBLIC_CONTENTSTACK_API_KEY!,
+               environment: process.env.NEXT_PUBLIC_CONTENTSTACK_ENVIRONMENT!,
+             },
+             clientUrlParams: { host: "<region-app-host>" }, // e.g. app.contentstack.com (NA), eu-app.contentstack.com (EU)
+             editButton: { enable: true },
+             editInVisualBuilderButton: { enable: false },
+           }),
+         )
+         .catch((err) => console.warn("[studio] Live Preview init failed; continuing without LP.", err));
+     }
+
+     export function LivePreview() { return null; }
+     ```
+     ```tsx
+     // app/layout.tsx (Server Component — no "use client")
+     import StudioClientRegistration from "@/studio/client-registration";
+     import { LivePreview } from "./live-preview";
+
+     export default function RootLayout({ children }: { children: React.ReactNode }) {
+       return (
+         <html><body>
+           <StudioClientRegistration />
+           <LivePreview />
+           {children}
+         </body></html>
+       );
+     }
+     ```
+
+     - The registration file imports `lib/contentstack.ts` because the canvas connects only when `studioSdk.init` runs in the browser, and `setClientRegistration` is what loads that file there.
+     - Don't import `lib/contentstack.ts` or `studio/register-components.ts` in a client component every page renders, such as one in the layout. A static import sends the SDK and Studio's renderer to every page.
+     - Live Preview gets its own component because `lib/contentstack.ts` now loads in the browser only on the pages Studio opens. Keep one `ContentstackLivePreview.init` per page: never both here and in `lib/contentstack.ts`.
+     - The catch-all page imports `studio/register-components.ts` on the server ([`configure-csr-vs-ssr`](configure-csr-vs-ssr.md) step 3a), and the canvas page has no `"use client"` ([`setup-section-preview`](setup-section-preview.md) step 2).
+
+     **It throws (studio-react 2.0.x): a client boundary carries the init.** Create a tiny client component:
      ```tsx
      // app/studio-init.tsx
      "use client";
@@ -605,7 +681,7 @@ This skill succeeds only when ALL of the following are true. If any fails, do no
 - [ ] **`contentTypeUid` in the init file equals the chosen project's `contentTypeUid`** (compare the emitted file against the listing — `grep contentTypeUid src/lib/contentstack.ts`). If it reads `compositions`, that is correct ONLY when the project reported `compositions`
 - [ ] `.env.local` exists with the six `<PREFIX>_CONTENTSTACK_*` vars, including `_STUDIO_CONTENT_TYPE`
 - [ ] `.gitignore` includes `.env.local`
-- [ ] The app shell imports `@/lib/contentstack` for side-effect init. For Next.js App Router specifically, the import lives in a `"use client" StudioInit` component rendered from `app/layout.tsx`, NOT a direct side-effect import in the layout itself.
+- [ ] The app shell imports `@/lib/contentstack` for side-effect init. For Next.js App Router specifically, never as a direct side-effect import in the layout itself. With the `client-registration` entry (step 8 check), `studio/register-components.ts` imports it first, and `app/layout.tsx` renders `<StudioClientRegistration />` and `<LivePreview />`. On studio-react 2.0.x, the import lives in a `"use client" StudioInit` component rendered from `app/layout.tsx`.
 - [ ] For Vite: `resolve.dedupe` + `optimizeDeps.include` are set. The user has been told to serve a prod build (`vite preview`) to the Studio canvas
 - [ ] `<pm> run dev` (or `vite preview` for the canvas) starts without runtime errors
 - [ ] **Asserted from the rendered page, not from the source:** once a composition renders at a URL, `curl -s <url> | grep -c 'data-cslp'` returns a number greater than zero. Zero means bound values are reaching the DOM with no edit anchor. Visual Editor shows the page and refuses to edit it. Check `appendTags` above first, then the component's `$`-prefixed props ([`register-component`](register-component.md) § CSLP tags). If no composition exists yet, defer this check to [`verify-setup`](verify-setup.md) and say so.
